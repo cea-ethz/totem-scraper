@@ -1,0 +1,6 @@
+.env
+.venv
+__pycache__
+response.json
+components.json
+elements.json
