@@ -17,13 +17,23 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 driver = webdriver.Chrome()
 driver.set_window_size(2400, 1800)
-wait = WebDriverWait(driver, 5)
+wait = WebDriverWait(driver, 10)
 
 def from_percentage_to_number(percentage):
     try:
         return round(float(percentage.rstrip('%')) * 0.01, 3)
     except ValueError:
-        raise ValueError(f"Could not convert percentage to number: {percentage}")
+        raise ValueError(f"Could not convert percentage to number: {percentage}")    
+
+def find_min_max_number_in_string(string):
+    match = re.search(r"(\d+)\s*-\s*(\d+)\s*kg/m³", string)
+    if match:
+        min_value = match.group(1)
+        max_value = match.group(2)
+    else:
+        min_value = find_number_in_string(string)
+        max_value = min_value
+    return (min_value, max_value)
 
 def find_number_in_string(string):
     numbers = re.findall(r"\d+(?:\.\d+)?", string)
@@ -102,7 +112,7 @@ def scrape_elements():
 
     with open('elements.csv', mode='w', newline='') as file:
         writer = csv.writer(file, delimiter=';')
-        writer.writerow(['Element Name', 'Layer', 'Composition', 'Ratio', 'Component Name', 'Application', 'Lifetime', 'Thickness'])
+        writer.writerow(['Element Name', 'Element U-Value', 'Layer', 'Composition', 'Ratio', 'Component Name', 'Application', 'Lifetime', 'Thickness'])
 
         for i in range(len(elements)):
             try:
@@ -116,8 +126,14 @@ def scrape_elements():
 
                 # Scrape
                 element_name = wait_for_element(f"{element_details_selector} > div.propertiesAndImage > div > span.property.name > span.value").text                
+                try:
+                    element_u_value = driver.find_element(By.CSS_SELECTOR, f"{element_details_selector} > div.propertiesAndImage > div > span.property.uvalue > span.value")
+                    element_u_value = find_number_in_string(element_u_value.text)
+                except:
+                    # logging.info(f"No U-value found for element '{element_name}'")
+                    element_u_value = None
+
                 components = driver.find_elements(By.CSS_SELECTOR, f"{element_details_selector} > div.layerTable > div.layerTableScroll > div.rowGroups > div.rows > div.layerWrapper")
-                
                 for component in components:
                     try:
                         component_classes = component.get_attribute("class")
@@ -131,11 +147,12 @@ def scrape_elements():
                             try:
                                 thickness = find_number_in_string(component.find_element(By.CSS_SELECTOR, "div > div.properties > div.param1").text)
                             except:
-                                logging.info(f"No thickness found for:\n  element '{element_name}'\n  component '{name}' - '{application}'")
+                                # logging.info(f"No thickness found for:\n  element '{element_name}'\n  component '{name}' - '{application}'")
                                 thickness = None
 
                             writer.writerow([
                                 element_name, 
+                                element_u_value,
                                 layer,
                                 composition,
                                 ratio,
@@ -157,11 +174,12 @@ def scrape_elements():
                                 try:
                                     thickness = find_number_in_string(sublayer.find_element(By.CSS_SELECTOR, "div.properties > div.param1").text)
                                 except:
-                                    logging.info(f"No thickness found for:\n  element '{element_name}'\n  component '{name}' - '{application}'")
+                                    # logging.info(f"No thickness found for:\n  element '{element_name}'\n  component '{name}' - '{application}'")
                                     thickness = None
 
                                 writer.writerow([
                                     element_name, 
+                                    element_u_value,
                                     layer,
                                     composition,
                                     ratio,
@@ -194,7 +212,9 @@ def scrape_components():
         'name': f"{application_unit_details} > span.title > span.name",
         'application': f"{application_unit_details} > span.title > span.category",
         'properties': f"{application_unit_details} > div.collapsiblePanel > div.content > div.properties",
-        'end_of_life': f"{application_unit_details} > div.collapsiblePanel.endOfLife > div > span.header",
+        'reversibility_toggle_path': f"{application_unit_details} > div.collapsiblePanel.reversibility",
+        'type_of_assembly': f"{application_unit_details} > div.collapsiblePanel.reversibility > div.content > div.typeOfAssembly > div.type > span.value",
+        'end_of_life_toggle_path': f"{application_unit_details} > div.collapsiblePanel.endOfLife",
         'materials': f"{application_unit_details} > div.collapsiblePanel.endOfLife > div.content > table > tbody > tr"
     }
 
@@ -203,7 +223,9 @@ def scrape_components():
         'name': f"{worksection_details_selector} > span.title > span.name",
         'application': f"{worksection_details_selector} > span.title > span.category",
         'properties': f"{worksection_details_selector} > div > div.collapsiblePanel > div.content > div.properties",
-        'end_of_life': f"{worksection_details_selector} > div > div.collapsiblePanel.endOfLife > div > span.header",
+        'reversibility_toggle_path': f"{worksection_details_selector} > div > div.collapsiblePanel.reversibility",
+        'type_of_assembly': f"{worksection_details_selector} > div > div.collapsiblePanel.reversibility > div.content > div.typeOfAssembly > div.type > span.value",
+        'end_of_life_toggle_path': f"{worksection_details_selector} > div > div.collapsiblePanel.endOfLife",
         'materials': f"{worksection_details_selector} > div > div.collapsiblePanel.endOfLife > div.content > table > tbody > tr"
     }
 
@@ -212,7 +234,9 @@ def scrape_components():
         'name': f"{worksection_grouped_details_selector} > span.title > span.name",
         'application': f"{worksection_grouped_details_selector} > span.title > span.category",
         'properties': f"{worksection_grouped_details_selector} > div > div.collapsiblePanel > div.content > div.properties",
-        'end_of_life': f"{worksection_grouped_details_selector} > div > div.collapsiblePanel.endOfLife > div > span.header",
+        'reversibility_toggle_path': f"{worksection_grouped_details_selector} > div > div.collapsiblePanel.reversibility",
+        'type_of_assembly': f"{worksection_grouped_details_selector} > div > div.collapsiblePanel.reversibility > div.content > div.typeOfAssembly > div.type > span.value",
+        'end_of_life_toggle_path': f"{worksection_grouped_details_selector} > div > div.collapsiblePanel.endOfLife",
         'materials': f"{worksection_grouped_details_selector} > div > div.collapsiblePanel.endOfLife > div.content > table > tbody > tr"
     }
 
@@ -226,6 +250,7 @@ def scrape_components():
             'lambda': None,
             'r_value': None,
             'u_value': None,
+            'density': None,
             'functional_unit': None
         }
         property_elements = driver.find_elements(By.CSS_SELECTOR, component_detail_selectors['properties'])
@@ -250,21 +275,52 @@ def scrape_components():
                     properties['r_value'] = sub_element.find_element(By.CSS_SELECTOR, "span.value").text
                 elif label_text == "U-value":
                     properties['u_value'] = sub_element.find_element(By.CSS_SELECTOR, "span.value").text
+                elif label_text == "Density":
+                    properties['density'] = sub_element.find_element(By.CSS_SELECTOR, "span.value").text
+                    if properties['density'] in ["Not applicable", "Unknown"]:
+                        properties['density'] = None
                 elif label_text == "Functional unit":
                     properties['functional_unit'] = sub_element.find_element(By.CSS_SELECTOR, "span.value").text
         return properties
+    
+    def extract_component_type_of_assembly(component_identifier, detail_selectors):
+        has_reversibility = len(driver.find_elements(By.CSS_SELECTOR, detail_selectors['reversibility_toggle_path'])) == 1
+        if not has_reversibility:
+            logging.info(f"Reversibility toggle not found for '{component_identifier}'")
+            return None
 
-    def extract_component_materials(detail_selectors):
-        materials = driver.find_elements(By.CSS_SELECTOR, detail_selectors['materials'])
-        if not materials:
-            end_of_life = driver.find_elements(By.CSS_SELECTOR, detail_selectors['end_of_life'])
-            if len(end_of_life) != 1:
-                raise ValueError("No materials and end of life toggle found! Skipping...")
-            end_of_life = end_of_life[0]
-            safe_click(end_of_life)
-            wait_for_element(detail_selectors['materials'])
-            materials = driver.find_elements(By.CSS_SELECTOR, detail_selectors['materials'])
+        is_reversibility_open = len(driver.find_elements(By.CSS_SELECTOR, f"{detail_selectors['reversibility_toggle_path']} > div.headerWrapper > span.button.open")) == 1
+        if not is_reversibility_open:
+            reversibility_toggle = driver.find_element(By.CSS_SELECTOR, f"{detail_selectors['reversibility_toggle_path']} > div.headerWrapper > span.header")
+            safe_click(reversibility_toggle)
+            wait_for_element(f"{detail_selectors['reversibility_toggle_path']} > div.headerWrapper > span.button.open")
+
+        type_of_assembly = driver.find_elements(By.CSS_SELECTOR, detail_selectors['type_of_assembly'])
+        if len(type_of_assembly) != 1:
+            logging.info(f"Type of assembly not found for '{component_identifier}'")
+            return None
+        
+        return type_of_assembly[0].text
+    
+    def extract_component_materials(component_identifier, detail_selectors):
         material_data = []
+
+        has_end_of_life = len(driver.find_elements(By.CSS_SELECTOR, detail_selectors['end_of_life_toggle_path'])) == 1
+        if not has_end_of_life:
+            logging.info(f"End of life toggle not found for '{component_identifier}'")
+            return material_data
+
+        is_end_of_life_open = len(driver.find_elements(By.CSS_SELECTOR, f"{detail_selectors['end_of_life_toggle_path']} > div.headerWrapper > span.button.open")) == 1
+        if not is_end_of_life_open:
+            end_of_life_toggle = driver.find_element(By.CSS_SELECTOR, f"{detail_selectors['end_of_life_toggle_path']} > div.headerWrapper > span.header")
+            safe_click(end_of_life_toggle)
+            wait_for_element(f"{detail_selectors['end_of_life_toggle_path']} > div.headerWrapper > span.button.open")
+        
+        materials = driver.find_elements(By.CSS_SELECTOR, detail_selectors['materials'])
+        if len(materials) == 0:
+            logging.info(f"No materials found for '{component_identifier}'")
+            return material_data
+        
         for material in materials:
             material_data.append({
                 'description': material.find_element(By.CSS_SELECTOR, "td.description").text,
@@ -279,11 +335,14 @@ def scrape_components():
 
     def scrape_component(detail_selectors):
         component_name = wait_for_element(detail_selectors['name']).text                
-        component_application = wait_for_element(detail_selectors['application']).text  
+        component_application = wait_for_element(detail_selectors['application']).text
+        component_identifier = f"'{component_name}' - '{component_application}'"
         properties = extract_component_properties(detail_selectors)
-        materials = extract_component_materials(detail_selectors)
+        type_of_assembly = extract_component_type_of_assembly(component_identifier, detail_selectors)
+        materials = extract_component_materials(component_identifier, detail_selectors)
 
         for material in materials:
+            min_density, max_density = find_min_max_number_in_string(properties['density']) if properties['density'] else (None, None)
             writer.writerow([
                 component_name,
                 component_application,
@@ -294,7 +353,10 @@ def scrape_components():
                 find_number_in_string(properties['lambda']) if properties['lambda'] else None,
                 find_number_in_string(properties['r_value']) if properties['r_value'] else None,
                 find_number_in_string(properties['u_value']) if properties['u_value'] else None,
+                min_density,
+                max_density,
                 format_functional_unit(properties['functional_unit']),
+                type_of_assembly,
                 material['description'],
                 material['waste_category'],
                 from_percentage_to_number(material['landfill']),
@@ -318,8 +380,8 @@ def scrape_components():
     with open('components.csv', mode='w', newline='') as file:
         writer = csv.writer(file, delimiter=';')
         writer.writerow(['Component Name', 'Application', 'Category', 'Type', 
-                         'Database', 'LCI-ID', 'Lambda', 'R-Value', 'U-Value', 
-                         'Functional Unit', 'Material', 'Waste Category', 'Landfill', 
+                         'Database', 'LCI-ID', 'Lambda', 'R-Value', 'U-Value', 'Min Density', 'Max Density',
+                         'Functional Unit', 'Type of Assembly', 'Material', 'Waste Category', 'Landfill', 
                          'Incineration', 'Reuse', 'Recycling', 'Sorted on Building Site'])
 
         for i in range(len(components)):
